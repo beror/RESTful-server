@@ -116,7 +116,7 @@ func EditPLanguageEndpoint(w http.ResponseWriter, req *http.Request) {
 
 	newAndOldPLangs := struct {
 		NameToEdit string
-		NewName string
+		NewName    string
 	}{}
 	json.NewDecoder(req.Body).Decode(&newAndOldPLangs)
 
@@ -172,58 +172,69 @@ func LoginEndpoint(w http.ResponseWriter, req *http.Request) {
 
 	if user.Username != "" && user.Password != "" {
 		fmt.Println("Found the user in the database")
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims {
-			"username":            user.Username, // TODO: should send user's id instead
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"username":            user.Username, // TODO: should send user's id instead?
 			"userPermissionLevel": "0",
 		})
 		createdJWT, _ = token.SignedString(secret)
 		fmt.Printf("JWT for %v: %v\n\n", user.Username, createdJWT)
-		w.Header().Set("Authorization", "Bearer " + createdJWT)
+		w.Header().Set("Authorization", "Bearer "+createdJWT)
 	} else {
 		fmt.Println("No such user found\n")
 	}
 }
 
-func SignupEndpoint(w http.ResponseWriter, req *http.Request) { //probably should be more validation and acknowledgment
+func SignupEndpoint(w http.ResponseWriter, req *http.Request) {
 	var user User
 	json.NewDecoder(req.Body).Decode(&user)
 
-	fmt.Println("Signup", user.Username, user.Password)
+	fmt.Printf("Signup %v, %v\n\n", user.Username, user.Password)
 
-	db.Exec("INSERT INTO users (Username, Password) VALUES (?, ?)", user.Username, user.Password)
+	_, err := db.Exec("INSERT INssTO users (Username, Password) VALUES (?, ?)", user.Username, user.Password)
+	if err != nil {
+		fmt.Printf("Error querying database: %v\n\n", err)
+		http.Error(w, "Couldn't add to database", http.StatusInternalServerError)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
 
-	w.WriteHeader(http.StatusOK)
 }
 
-func JWTmiddleware(next http.Handler) func(w http.ResponseWriter, req *http.Request) {
-	return func(w http.ResponseWriter, req *http.Request) {
-		if createdJWT == strings.Split(req.Header.Get("Authorization"), " ")[1] { // TODO: Make index-out-of-range safe
+func JWTmiddleware(next func(http.ResponseWriter, *http.Request)) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		token = strings.Split(req.Header.Get("Authorization"), " ")
+		if len(token) != 2 {
+			fmt.Println("Couldn't authorize with JWT. Received malformed Authorization header value\n")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		token = token[1]
+
+		if createdJWT == token {
 			fmt.Println("Authorized with JWT middleware\n")
-			next.ServeHTTP(w, req)
+			next(w, req)
 		} else {
 			fmt.Println("Couldn't authorize with JWT. JWTs are not the same\n")
 			w.WriteHeader(http.StatusUnauthorized)
 		}
-	}
+	})
 }
 
 func main() {
 	fmt.Println("Programming languages and users server\n")
-	fmt.Println("Opening database")
-	var errDB error
-	db, errDB = sql.Open("mysql", "root:password@tcp(localhost:3306)/programming_languages")
-	if errDB == nil { //Useless, no error if MySQL is not working
-		fmt.Println("Database opened successfuly\n")
-	} else {
-		fmt.Println("Couldn't open database\n")
+	var errOpen error
+	db, errOpen = sql.Open("mysql", "root:password@tcp(localhost:3306)/programming_languages")
+	errPing := db.Ping()
+	if errPing != nil || errOpen != nil {
+		fmt.Printf("Error establishing connection to database:\nOpen() error: %v\nPing() error: %v", errOpen, errPing)
 	}
 	defer db.Close()
 
 	router := mux.NewRouter()
-	router.HandleFunc("/PLanguages", JWTmiddleware(http.HandlerFunc(GetPLanguagesEndpoint))).Methods("GET")
-	router.HandleFunc("/PLanguages", JWTmiddleware(http.HandlerFunc(AddPLanguageEndpoint))).Methods("POST")
-	router.HandleFunc("/PLanguages/{id}", JWTmiddleware(http.HandlerFunc(DeletePLanguageEndpoint))).Methods("DELETE")
-	router.HandleFunc("/PLanguages", JWTmiddleware(http.HandlerFunc(EditPLanguageEndpoint))).Methods("PUT")
+	router.Handle("/PLanguages", JWTmiddleware(GetPLanguagesEndpoint)).Methods("GET")
+	router.Handle("/PLanguages", JWTmiddleware(AddPLanguageEndpoint)).Methods("POST")
+	router.Handle("/PLanguages/{id}", JWTmiddleware(DeletePLanguageEndpoint)).Methods("DELETE")
+	router.Handle("/PLanguages", JWTmiddleware(EditPLanguageEndpoint)).Methods("PUT")
 	router.HandleFunc("/login", LoginEndpoint).Methods("POST")
 	router.HandleFunc("/signup", SignupEndpoint).Methods("POST")
 
