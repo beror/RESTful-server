@@ -26,7 +26,7 @@ func main() {
 		time.Sleep(3 * time.Second)
 		return
 	} else {
-		fmt.Println("Successfully connected to database")
+		fmt.Println("Successfully connected to database\n")
 	}
 	defer db.Close()
 

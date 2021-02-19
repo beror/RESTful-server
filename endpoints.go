@@ -140,6 +140,7 @@ func LoginEndpoint(w http.ResponseWriter, req *http.Request) {
 		}
 	} else {
 		fmt.Println("No such user found\n")
+		w.WriteHeader(http.StatusUnauthorized)
 	}
 }
 
